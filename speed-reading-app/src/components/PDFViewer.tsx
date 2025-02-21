@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useRef } from "react";
 import { getDocument } from "pdfjs-dist";
 import "pdfjs-dist/build/pdf.worker.entry";
+
 interface PDFViewerProps {
   file: string;
 }
+
 const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
+  // State variables
   const [speed, setSpeed] = useState<number>(1000); // Speed in milliseconds
   const [numWords, setNumWords] = useState<number>(3); // Words per highlight
   const [words, setWords] = useState<string[]>([]); // Extracted words
@@ -12,9 +15,13 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
   const [isReading, setIsReading] = useState<boolean>(false); // Controls start/stop
   const [intervalId, setIntervalId] = useState<NodeJS.Timeout | null>(null); // Stores interval reference
   const [theme, setTheme] = useState<"theme1" | "theme2">("theme1"); // Theme state
-  // Reference to the text container for scrolling
+  const [isHighlighterOn, setIsHighlighterOn] = useState<boolean>(false); // Highlighter state
+  const [highlightedWords, setHighlightedWords] = useState<Set<number>>(new Set()); // Track highlighted words
+
+  // Refs
   const textContainerRef = useRef<HTMLDivElement | null>(null);
-  const wordElementsRef = useRef<(HTMLSpanElement | null)[]>([]); // To store references to word elements
+  const wordElementsRef = useRef<(HTMLSpanElement | null)[]>([]);
+
   // Theme 1 styles
   const theme1Styles = {
     container: {
@@ -44,6 +51,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
       color: "black",
     },
   };
+
   // Theme 2 styles
   const theme2Styles = {
     container: {
@@ -75,28 +83,35 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
       color: "#007bff",
     },
   };
+
   // Current theme styles
   const currentTheme = theme === "theme1" ? theme1Styles : theme2Styles;
+
+  // Extract text from PDF
   useEffect(() => {
     if (!file) return;
+
     const extractText = async () => {
       try {
         const loadingTask = getDocument(file);
         const pdf = await loadingTask.promise;
         let extractedText = "";
-        // Extract text from each page of the PDF
+
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
           const textContent = await page.getTextContent();
           extractedText += textContent.items.map((item: any) => item.str).join(" ") + " ";
         }
+
         setWords(extractedText.trim().split(/\s+/)); // Store words and remove extra spaces
       } catch (error) {
         console.error("Error extracting text from PDF:", error);
       }
     };
+
     extractText();
   }, [file]);
+
   // Function to start reading
   const startReading = () => {
     if (intervalId) {
@@ -108,6 +123,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
     setIntervalId(id);
     setIsReading(true);
   };
+
   // Function to stop reading
   const stopReading = () => {
     if (intervalId) {
@@ -116,12 +132,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
     }
     setIsReading(false);
   };
+
   // Restart the reading process when speed changes (if already reading)
   useEffect(() => {
     if (isReading) {
       startReading();
     }
-  }, [speed, numWords]); // Restart when speed or number of words changes
+  }, [speed, numWords]);
+
   // Smooth scroll the page as the reader moves and center the current word
   const smoothScrollToWord = () => {
     if (textContainerRef.current && wordElementsRef.current) {
@@ -132,35 +150,58 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
         const containerRect = container.getBoundingClientRect();
         const wordCenterY = rect.top + rect.height / 2;
         const containerCenterY = containerRect.top + containerRect.height / 2;
-        // Calculate the distance to scroll
         const distanceToScroll = wordCenterY - containerCenterY;
-        // Easing function for smooth scrolling
-        const easeInOutQuad = (t: number) => {
-          if (t < 0.5) return 2 * t * t;
-          return -1 + (4 - 2 * t) * t;
-        };
+
+        const easeInOutQuad = (t: number) => (t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t);
+
         const start = container.scrollTop;
         const duration = 300; // Scroll duration in milliseconds
         let startTime: number | null = null;
+
         const scroll = (timestamp: number) => {
           if (!startTime) startTime = timestamp;
           const timeElapsed = timestamp - startTime;
           const progress = Math.min(timeElapsed / duration, 1);
           const easing = easeInOutQuad(progress);
           container.scrollTop = start + easing * distanceToScroll;
+
           if (progress < 1) {
             requestAnimationFrame(scroll);
           }
         };
+
         requestAnimationFrame(scroll);
       }
     }
   };
+
+  // Scroll to the current word when index changes
   useEffect(() => {
     if (currentIndex < words.length) {
       smoothScrollToWord();
     }
   }, [currentIndex, words.length]);
+
+  // Toggle highlighter
+  const toggleHighlighter = () => {
+    setIsHighlighterOn((prev) => !prev);
+  };
+
+  // Handle word click for highlighting
+  const handleWordClick = (index: number) => {
+    if (isHighlighterOn) {
+      setHighlightedWords((prev) => {
+        const newSet = new Set(prev);
+        if (newSet.has(index)) {
+          newSet.delete(index); // Remove highlight if already highlighted
+        } else {
+          newSet.add(index); // Add highlight
+        }
+        return newSet;
+      });
+    }
+  };
+
   return (
     <div
       style={{
@@ -170,13 +211,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
         ...currentTheme.container,
       }}
     >
-      {/* Theme Dropdown */}
+      {/* Theme Dropdown and Highlighter Toggle */}
       <div
         style={{
           position: "absolute",
           top: "10px",
           right: "20px",
           zIndex: 10,
+          display: "flex",
+          gap: "10px",
         }}
       >
         <label style={{ ...currentTheme.label, marginRight: "10px" }}>Theme:</label>
@@ -188,7 +231,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
           <option value="theme1">Theme 1</option>
           <option value="theme2">Theme 2</option>
         </select>
+
+        {/* Highlighter Toggle Button */}
+        <button
+          onClick={toggleHighlighter}
+          style={{
+            ...currentTheme.button,
+            backgroundColor: isHighlighterOn ? "#28a745" : "#dc3545",
+          }}
+        >
+          {isHighlighterOn ? "Highlighter On" : "Highlighter Off"}
+        </button>
       </div>
+
       {/* Controls (Speed, Words, Start/Stop) */}
       <div
         style={{
@@ -253,6 +308,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
           </button>
         </div>
       </div>
+
       {/* Text Display with Highlighting */}
       <div
         ref={textContainerRef}
@@ -273,23 +329,29 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
         >
           {words.map((word, index) => (
             <span
-              ref={(el) => (wordElementsRef.current[index] = el)} // Store references to each word
-              key={index}
-              style={{
-                color:
-                  index >= currentIndex && index < currentIndex + numWords
-                    ? currentTheme.textHighlight.color
-                    : currentTheme.container.color,
-                transition: "color 0.3s ease-in-out",
-                marginRight: "5px",
-              }}
-            >
-              {word}
-            </span>
+            ref={(el) => (wordElementsRef.current[index] = el)}
+            key={index}
+            onClick={() => handleWordClick(index)}
+            style={{
+              color:
+                highlightedWords.has(index)
+                  ? "black" // Highlighted words are black
+                  : index >= currentIndex && index < currentIndex + numWords
+                  ? currentTheme.textHighlight.color // Reading highlight color
+                  : currentTheme.container.color, // Default color
+              fontWeight: highlightedWords.has(index) ? "bold" : "normal", // Bold for highlighted words
+              transition: "color 0.3s ease-in-out, font-weight 0.3s ease-in-out",
+              marginRight: "5px",
+              cursor: isHighlighterOn ? "pointer" : "default",
+            }}
+          >
+            {word}
+          </span>
           ))}
         </p>
       </div>
     </div>
   );
 };
+
 export default PDFViewer;
