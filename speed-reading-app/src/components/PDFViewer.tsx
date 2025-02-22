@@ -17,6 +17,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
   const [theme, setTheme] = useState<"theme1" | "theme2">("theme1"); // Theme state
   const [isHighlighterOn, setIsHighlighterOn] = useState<boolean>(false); // Highlighter state
   const [highlightedWords, setHighlightedWords] = useState<Set<number>>(new Set()); // Track highlighted words
+  const [isTTSEnabled, setIsTTSEnabled] = useState<boolean>(false); // TTS state
+  const [searchQuery, setSearchQuery] = useState<string>(""); // Search query
+  const [searchResults, setSearchResults] = useState<number[]>([]); // Search results
 
   // Refs
   const textContainerRef = useRef<HTMLDivElement | null>(null);
@@ -182,6 +185,25 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
     }
   }, [currentIndex, words.length]);
 
+  // Toggle TTS
+  const toggleTTS = () => {
+    if (isTTSEnabled) {
+      window.speechSynthesis.cancel(); // Stop TTS if it's already running
+    } else {
+      const utterance = new SpeechSynthesisUtterance(words.slice(currentIndex, currentIndex + numWords).join(" "));
+      window.speechSynthesis.speak(utterance); // Start TTS
+    }
+    setIsTTSEnabled((prev) => !prev);
+  };
+
+  // Handle search
+  const handleSearch = () => {
+    const results = words
+      .map((word, index) => (word.toLowerCase().includes(searchQuery.toLowerCase()) ? index : -1))
+      .filter((index) => index !== -1);
+    setSearchResults(results);
+  };
+
   // Toggle highlighter
   const toggleHighlighter = () => {
     setIsHighlighterOn((prev) => !prev);
@@ -309,6 +331,49 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
         </div>
       </div>
 
+      {/* Search Functionality */}
+      <div
+        style={{
+          position: "absolute",
+          top: "60px",
+          left: "20px",
+          zIndex: 10,
+          display: "flex",
+          gap: "10px",
+        }}
+      >
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search..."
+          style={currentTheme.dropdown}
+        />
+        <button onClick={handleSearch} style={currentTheme.button}>
+          Search
+        </button>
+      </div>
+
+      {/* TTS Toggle */}
+      <div
+        style={{
+          position: "absolute",
+          top: "100px",
+          left: "20px",
+          zIndex: 10,
+        }}
+      >
+        <button
+          onClick={toggleTTS}
+          style={{
+            ...currentTheme.button,
+            backgroundColor: isTTSEnabled ? "#28a745" : "#dc3545",
+          }}
+        >
+          {isTTSEnabled ? "TTS On" : "TTS Off"}
+        </button>
+      </div>
+
       {/* Text Display with Highlighting */}
       <div
         ref={textContainerRef}
@@ -316,7 +381,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
           width: "100%",
           height: "100%",
           overflow: "auto",
-          marginTop: "40px",
+          marginTop: "140px",
         }}
       >
         <p
@@ -329,24 +394,25 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
         >
           {words.map((word, index) => (
             <span
-            ref={(el) => (wordElementsRef.current[index] = el)}
-            key={index}
-            onClick={() => handleWordClick(index)}
-            style={{
-              color:
-                highlightedWords.has(index)
-                  ? "black" // Highlighted words are black
-                  : index >= currentIndex && index < currentIndex + numWords
-                  ? currentTheme.textHighlight.color // Reading highlight color
-                  : currentTheme.container.color, // Default color
-              fontWeight: highlightedWords.has(index) ? "bold" : "normal", // Bold for highlighted words
-              transition: "color 0.3s ease-in-out, font-weight 0.3s ease-in-out",
-              marginRight: "5px",
-              cursor: isHighlighterOn ? "pointer" : "default",
-            }}
-          >
-            {word}
-          </span>
+              ref={(el) => (wordElementsRef.current[index] = el)}
+              key={index}
+              onClick={() => handleWordClick(index)}
+              style={{
+                color:
+                  highlightedWords.has(index)
+                    ? "black" // Highlighted words are black
+                    : index >= currentIndex && index < currentIndex + numWords
+                    ? currentTheme.textHighlight.color // Reading highlight color
+                    : currentTheme.container.color, // Default color
+                fontWeight: highlightedWords.has(index) ? "bold" : "normal", // Bold for highlighted words
+                backgroundColor: searchResults.includes(index) ? "yellow" : "transparent", // Search highlight
+                transition: "color 0.3s ease-in-out, font-weight 0.3s ease-in-out",
+                marginRight: "5px",
+                cursor: isHighlighterOn ? "pointer" : "default",
+              }}
+            >
+              {word}
+            </span>
           ))}
         </p>
       </div>

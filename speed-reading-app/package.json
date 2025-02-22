@@ -13,6 +13,7 @@
     "@react-pdf-viewer/core": "^3.12.0",
     "@react-pdf-viewer/highlight": "^3.12.0",
     "@tailwindcss/postcss": "^4.0.3",
+    "@types/react-window": "^1.8.8",
     "autoprefixer": "^10.4.20",
     "pdfjs-dist": "^3.11.174",
     "postcss": "^8.4.31",
@@ -21,6 +22,7 @@
     "react-icons": "^5.4.0",
     "react-pdf": "^9.2.1",
     "react-router-dom": "^7.1.5",
+    "react-window": "^1.8.11",
     "tailwindcss": "^4.0.3"
   },
   "devDependencies": {
