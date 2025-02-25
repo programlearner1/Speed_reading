@@ -18,8 +18,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
   const [isHighlighterOn, setIsHighlighterOn] = useState<boolean>(false); // Highlighter state
   const [highlightedWords, setHighlightedWords] = useState<Set<number>>(new Set()); // Track highlighted words
   const [isTTSEnabled, setIsTTSEnabled] = useState<boolean>(false); // TTS state
-  const [searchQuery, setSearchQuery] = useState<string>(""); // Search query
-  const [searchResults, setSearchResults] = useState<number[]>([]); // Search results
 
   // Refs
   const textContainerRef = useRef<HTMLDivElement | null>(null);
@@ -125,6 +123,11 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
     }, speed);
     setIntervalId(id);
     setIsReading(true);
+
+    // Resume TTS if enabled
+    if (isTTSEnabled) {
+      window.speechSynthesis.resume();
+    }
   };
 
   // Function to stop reading
@@ -134,9 +137,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
       setIntervalId(null);
     }
     setIsReading(false);
+
+    // Pause TTS if enabled
+    if (isTTSEnabled) {
+      window.speechSynthesis.pause();
+    }
   };
 
-  // Restart the reading process when speed changes (if already reading)
+  // Restart the reading process when speed or numWords changes (if already reading)
   useEffect(() => {
     if (isReading) {
       startReading();
@@ -185,23 +193,27 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
     }
   }, [currentIndex, words.length]);
 
+  // TTS: Read the current words being highlighted
+  useEffect(() => {
+    if (isTTSEnabled && isReading) {
+      const utterance = new SpeechSynthesisUtterance(words.slice(currentIndex, currentIndex + numWords).join(" "));
+      utterance.rate = 1; // Default speed
+      utterance.onend = () => {
+        // Automatically advance to the next set of words after TTS finishes
+        if (isReading) {
+          setCurrentIndex((prevIndex) => (prevIndex + numWords >= words.length ? 0 : prevIndex + numWords));
+        }
+      };
+      window.speechSynthesis.speak(utterance);
+    }
+  }, [currentIndex, isTTSEnabled, isReading, words, numWords]);
+
   // Toggle TTS
   const toggleTTS = () => {
     if (isTTSEnabled) {
       window.speechSynthesis.cancel(); // Stop TTS if it's already running
-    } else {
-      const utterance = new SpeechSynthesisUtterance(words.slice(currentIndex, currentIndex + numWords).join(" "));
-      window.speechSynthesis.speak(utterance); // Start TTS
     }
     setIsTTSEnabled((prev) => !prev);
-  };
-
-  // Handle search
-  const handleSearch = () => {
-    const results = words
-      .map((word, index) => (word.toLowerCase().includes(searchQuery.toLowerCase()) ? index : -1))
-      .filter((index) => index !== -1);
-    setSearchResults(results);
   };
 
   // Toggle highlighter
@@ -254,16 +266,41 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
           <option value="theme2">Theme 2</option>
         </select>
 
-        {/* Highlighter Toggle Button */}
-        <button
-          onClick={toggleHighlighter}
+        {/* Highlighter Toggle Switch */}
+        <div
           style={{
-            ...currentTheme.button,
-            backgroundColor: isHighlighterOn ? "#28a745" : "#dc3545",
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
           }}
         >
-          {isHighlighterOn ? "Highlighter On" : "Highlighter Off"}
-        </button>
+          <label style={{ ...currentTheme.label }}>Highlighter:</label>
+          <div
+            onClick={toggleHighlighter}
+            style={{
+              width: "50px",
+              height: "25px",
+              backgroundColor: isHighlighterOn ? "#28a745" : "#dc3545",
+              borderRadius: "25px",
+              position: "relative",
+              cursor: "pointer",
+              transition: "background-color 0.3s ease",
+            }}
+          >
+            <div
+              style={{
+                width: "21px",
+                height: "21px",
+                backgroundColor: "white",
+                borderRadius: "50%",
+                position: "absolute",
+                top: "2px",
+                left: isHighlighterOn ? "27px" : "2px",
+                transition: "left 0.3s ease",
+              }}
+            />
+          </div>
+        </div>
       </div>
 
       {/* Controls (Speed, Words, Start/Stop) */}
@@ -331,47 +368,44 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
         </div>
       </div>
 
-      {/* Search Functionality */}
-      <div
-        style={{
-          position: "absolute",
-          top: "60px",
-          left: "20px",
-          zIndex: 10,
-          display: "flex",
-          gap: "10px",
-        }}
-      >
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search..."
-          style={currentTheme.dropdown}
-        />
-        <button onClick={handleSearch} style={currentTheme.button}>
-          Search
-        </button>
-      </div>
-
-      {/* TTS Toggle */}
+      {/* TTS Toggle Switch */}
       <div
         style={{
           position: "absolute",
           top: "100px",
           left: "20px",
           zIndex: 10,
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
         }}
       >
-        <button
+        <label style={{ ...currentTheme.label }}>TTS:</label>
+        <div
           onClick={toggleTTS}
           style={{
-            ...currentTheme.button,
+            width: "50px",
+            height: "25px",
             backgroundColor: isTTSEnabled ? "#28a745" : "#dc3545",
+            borderRadius: "25px",
+            position: "relative",
+            cursor: "pointer",
+            transition: "background-color 0.3s ease",
           }}
         >
-          {isTTSEnabled ? "TTS On" : "TTS Off"}
-        </button>
+          <div
+            style={{
+              width: "21px",
+              height: "21px",
+              backgroundColor: "white",
+              borderRadius: "50%",
+              position: "absolute",
+              top: "2px",
+              left: isTTSEnabled ? "27px" : "2px",
+              transition: "left 0.3s ease",
+            }}
+          />
+        </div>
       </div>
 
       {/* Text Display with Highlighting */}
@@ -405,7 +439,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
                     ? currentTheme.textHighlight.color // Reading highlight color
                     : currentTheme.container.color, // Default color
                 fontWeight: highlightedWords.has(index) ? "bold" : "normal", // Bold for highlighted words
-                backgroundColor: searchResults.includes(index) ? "yellow" : "transparent", // Search highlight
                 transition: "color 0.3s ease-in-out, font-weight 0.3s ease-in-out",
                 marginRight: "5px",
                 cursor: isHighlighterOn ? "pointer" : "default",
