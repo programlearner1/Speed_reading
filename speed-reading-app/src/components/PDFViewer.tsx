@@ -18,6 +18,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
   const [isHighlighterOn, setIsHighlighterOn] = useState<boolean>(false); // Highlighter state
   const [highlightedWords, setHighlightedWords] = useState<Set<number>>(new Set()); // Track highlighted words
   const [isTTSEnabled, setIsTTSEnabled] = useState<boolean>(false); // TTS state
+  const [selectedWord, setSelectedWord] = useState<string | null>(null); // Selected word for meaning
+  const [wordMeaning, setWordMeaning] = useState<string | null>(null); // Meaning of the selected word
+  const [dialogPosition, setDialogPosition] = useState<{ top: number; left: number } | null>(null); // Position of the dialog box
 
   // Refs
   const textContainerRef = useRef<HTMLDivElement | null>(null);
@@ -221,6 +224,22 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
     setIsHighlighterOn((prev) => !prev);
   };
 
+  // Fetch word meaning from the API
+  const fetchWordMeaning = async (word: string) => {
+    try {
+      const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
+      const data = await response.json();
+      if (data && data[0] && data[0].meanings && data[0].meanings[0] && data[0].meanings[0].definitions[0]) {
+        setWordMeaning(data[0].meanings[0].definitions[0].definition);
+      } else {
+        setWordMeaning("Meaning not found");
+      }
+    } catch (error) {
+      console.error("Error fetching word meaning:", error);
+      setWordMeaning("Error fetching meaning");
+    }
+  };
+
   // Handle word click for highlighting
   const handleWordClick = (index: number) => {
     if (isHighlighterOn) {
@@ -234,6 +253,28 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
         return newSet;
       });
     }
+  };
+
+  // Handle mouse enter event for highlighted words
+  const handleMouseEnter = (index: number, event: React.MouseEvent) => {
+    if (highlightedWords.has(index)) {
+      const word = words[index];
+      setSelectedWord(word);
+      fetchWordMeaning(word); // Fetch meaning of the word
+      // Set dialog box position
+      const target = event.currentTarget as HTMLElement;
+      if (target) {
+        const rect = target.getBoundingClientRect();
+        setDialogPosition({ top: rect.top, left: rect.left });
+      }
+    }
+  };
+
+  // Handle mouse leave event for highlighted words
+  const handleMouseLeave = () => {
+    setSelectedWord(null);
+    setWordMeaning(null);
+    setDialogPosition(null);
   };
 
   return (
@@ -431,6 +472,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
               ref={(el) => (wordElementsRef.current[index] = el)}
               key={index}
               onClick={() => handleWordClick(index)}
+              onMouseEnter={(e) => handleMouseEnter(index, e)}
+              onMouseLeave={handleMouseLeave}
               style={{
                 color:
                   highlightedWords.has(index)
@@ -449,6 +492,25 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
           ))}
         </p>
       </div>
+
+      {/* Dialog Box for Word Meaning */}
+      {selectedWord && dialogPosition && (
+        <div
+          style={{
+            position: "absolute",
+            top: dialogPosition.top - 50, // Adjust position as needed
+            left: dialogPosition.left,
+            backgroundColor: "white",
+            border: "1px solid #ccc",
+            borderRadius: "5px",
+            padding: "10px",
+            boxShadow: "0 2px 10px rgba(0, 0, 0, 0.1)",
+            zIndex: 1000,
+          }}
+        >
+          <strong>{selectedWord}</strong>: {wordMeaning || "Loading..."}
+        </div>
+      )}
     </div>
   );
 };
