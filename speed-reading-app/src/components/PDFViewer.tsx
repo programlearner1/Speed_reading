@@ -25,71 +25,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
   // Refs
   const textContainerRef = useRef<HTMLDivElement | null>(null);
   const wordElementsRef = useRef<(HTMLSpanElement | null)[]>([]);
-
-  // Theme 1 styles
-  const theme1Styles = {
-    container: {
-      backgroundColor: "white",
-      color: "rgb(201,197,197)",
-    },
-    button: {
-      padding: "8px 16px",
-      backgroundColor: "#007bff",
-      color: "#fff",
-      border: "none",
-      borderRadius: "5px",
-      cursor: "pointer",
-    },
-    dropdown: {
-      padding: "5px 10px",
-      backgroundColor: "#333",
-      color: "#fff",
-      borderRadius: "5px",
-      border: "none",
-    },
-    label: {
-      fontWeight: "bold" as const,
-      color: "black" as const,
-    },
-    textHighlight: {
-      color: "black",
-    },
-  };
-
-  // Theme 2 styles
-  const theme2Styles = {
-    container: {
-      backgroundColor: "#f5f5f5",
-      color: "#333",
-      fontFamily: "'Arial', sans-serif",
-    },
-    button: {
-      padding: "8px 16px",
-      backgroundColor: "#007bff",
-      color: "#fff",
-      border: "none",
-      borderRadius: "5px",
-      cursor: "pointer",
-      transition: "background-color 0.3s ease",
-    },
-    dropdown: {
-      padding: "5px 10px",
-      backgroundColor: "#333",
-      color: "#fff",
-      borderRadius: "5px",
-      border: "none",
-    },
-    label: {
-      fontWeight: "bold",
-      color: "#333",
-    },
-    textHighlight: {
-      color: "#007bff",
-    },
-  };
-
-  // Current theme styles
-  const currentTheme = theme === "theme1" ? theme1Styles : theme2Styles;
+  const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   // Extract text from PDF
   useEffect(() => {
@@ -116,43 +52,143 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
     extractText();
   }, [file]);
 
-  // Function to start reading
-  const startReading = () => {
-    if (intervalId) {
-      clearInterval(intervalId); // Clear any existing interval before starting a new one
-    }
-    const id = setInterval(() => {
-      setCurrentIndex((prevIndex) => (prevIndex + numWords >= words.length ? 0 : prevIndex + numWords)); // Advance based on numWords
-    }, speed);
-    setIntervalId(id);
-    setIsReading(true);
+  // Function to speak words using TTS
+  const speakWords = () => {
+    if (!isReading || !isTTSEnabled || currentIndex >= words.length) return;
 
-    // Resume TTS if enabled
-    if (isTTSEnabled) {
-      window.speechSynthesis.resume();
+    // Cancel any existing speech
+    if (currentUtteranceRef.current) {
+      window.speechSynthesis.cancel();
+      currentUtteranceRef.current = null;
+    }
+
+    // Get current chunk of words
+    const currentChunk = words.slice(currentIndex, currentIndex + numWords).join(" ");
+    
+    const utterance = new SpeechSynthesisUtterance(currentChunk);
+    currentUtteranceRef.current = utterance;
+    
+    // Calculate appropriate rate based on speed setting
+    const baseRate = 1.0;
+    const speedFactor = 1000 / speed;
+    utterance.rate = Math.min(Math.max(baseRate * speedFactor, 0.5), 2.5);
+    
+    // Set voice properties
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+    
+    utterance.onend = () => {
+      if (!isReading) {
+        currentUtteranceRef.current = null;
+        return;
+      }
+      
+      const nextIndex = currentIndex + numWords;
+      if (nextIndex >= words.length) {
+        stopReading();
+        return;
+      }
+      
+      currentUtteranceRef.current = null;
+      setCurrentIndex(nextIndex);
+    };
+
+    utterance.onerror = (event) => {
+      console.error('TTS Error occurred:', event.error);
+      currentUtteranceRef.current = null;
+      stopReading();
+    };
+
+    try {
+      window.speechSynthesis.speak(utterance);
+    } catch (error) {
+      console.error('Failed to start speech:', error);
+      currentUtteranceRef.current = null;
+      stopReading();
     }
   };
 
-  // Function to stop reading
-  const stopReading = () => {
+  // Effect to handle TTS when currentIndex changes
+  useEffect(() => {
+    if (isReading && isTTSEnabled) {
+      // Small delay to ensure state is updated
+      const timeoutId = setTimeout(() => {
+        speakWords();
+      }, 50);
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [currentIndex, isReading, isTTSEnabled]);
+
+  // Start reading
+  const startReading = () => {
     if (intervalId) {
       clearInterval(intervalId);
       setIntervalId(null);
     }
-    setIsReading(false);
 
-    // Pause TTS if enabled
-    if (isTTSEnabled) {
-      window.speechSynthesis.pause();
+    // Reset current utterance
+    if (currentUtteranceRef.current) {
+      window.speechSynthesis.cancel();
+      currentUtteranceRef.current = null;
+    }
+
+    setCurrentIndex(0);
+    setIsReading(true);
+
+    if (!isTTSEnabled) {
+      const id = setInterval(() => {
+        setCurrentIndex(prevIndex => {
+          const nextIndex = prevIndex + numWords;
+          if (nextIndex >= words.length) {
+            stopReading();
+            return prevIndex;
+          }
+          return nextIndex;
+        });
+      }, speed);
+      setIntervalId(id);
     }
   };
 
-  // Restart the reading process when speed or numWords changes (if already reading)
+  // Stop reading
+  const stopReading = () => {
+    setIsReading(false);
+    
+    if (intervalId) {
+      clearInterval(intervalId);
+      setIntervalId(null);
+    }
+
+    if (isTTSEnabled && currentUtteranceRef.current) {
+      window.speechSynthesis.cancel();
+      currentUtteranceRef.current = null;
+    }
+  };
+
+  // Handle speed/numWords changes
   useEffect(() => {
     if (isReading) {
-      startReading();
+      const currentPos = currentIndex;
+      stopReading();
+      
+      // Small delay to ensure cleanup is complete
+      setTimeout(() => {
+        setCurrentIndex(currentPos);
+        setIsReading(true);
+      }, 50);
     }
   }, [speed, numWords]);
+
+  // Toggle TTS
+  const toggleTTS = () => {
+    if (currentUtteranceRef.current) {
+      window.speechSynthesis.cancel();
+      currentUtteranceRef.current = null;
+    }
+    stopReading();
+    setIsTTSEnabled(prev => !prev);
+  };
 
   // Smooth scroll the page as the reader moves and center the current word
   const smoothScrollToWord = () => {
@@ -196,29 +232,6 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
     }
   }, [currentIndex, words.length]);
 
-  // TTS: Read the current words being highlighted
-  useEffect(() => {
-    if (isTTSEnabled && isReading) {
-      const utterance = new SpeechSynthesisUtterance(words.slice(currentIndex, currentIndex + numWords).join(" "));
-      utterance.rate = 1; // Default speed
-      utterance.onend = () => {
-        // Automatically advance to the next set of words after TTS finishes
-        if (isReading) {
-          setCurrentIndex((prevIndex) => (prevIndex + numWords >= words.length ? 0 : prevIndex + numWords));
-        }
-      };
-      window.speechSynthesis.speak(utterance);
-    }
-  }, [currentIndex, isTTSEnabled, isReading, words, numWords]);
-
-  // Toggle TTS
-  const toggleTTS = () => {
-    if (isTTSEnabled) {
-      window.speechSynthesis.cancel(); // Stop TTS if it's already running
-    }
-    setIsTTSEnabled((prev) => !prev);
-  };
-
   // Toggle highlighter
   const toggleHighlighter = () => {
     setIsHighlighterOn((prev) => !prev);
@@ -260,8 +273,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
     if (highlightedWords.has(index)) {
       const word = words[index];
       setSelectedWord(word);
-      fetchWordMeaning(word); // Fetch meaning of the word
-      // Set dialog box position
+      fetchWordMeaning(word);
       const target = event.currentTarget as HTMLElement;
       if (target) {
         const rect = target.getBoundingClientRect();
@@ -271,7 +283,28 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
   };
 
   // Handle mouse leave event for highlighted words
-  const handleMouseLeave = () => {
+  const handleMouseLeave = (event: React.MouseEvent) => {
+    const relatedTarget = event.relatedTarget as HTMLElement;
+    // Check if the mouse is moving to the dialog box
+    if (relatedTarget?.closest('.word-meaning-dialog')) {
+      return;
+    }
+    setSelectedWord(null);
+    setWordMeaning(null);
+    setDialogPosition(null);
+  };
+
+  // Handle dialog mouse events
+  const handleDialogMouseEnter = () => {
+    // Keep the dialog visible while hovering over it
+  };
+
+  const handleDialogMouseLeave = (event: React.MouseEvent) => {
+    const relatedTarget = event.relatedTarget as HTMLElement;
+    // Check if the mouse is moving back to the word
+    if (relatedTarget?.closest('.highlighted-word')) {
+      return;
+    }
     setSelectedWord(null);
     setWordMeaning(null);
     setDialogPosition(null);
@@ -283,234 +316,457 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
         position: "relative",
         height: "100vh",
         padding: "20px",
-        ...currentTheme.container,
+        backgroundColor: theme === "theme1" ? "white" : "#f5f5f5",
+        color: theme === "theme1" ? "rgb(201,197,197)" : "#333",
+        transition: "all 0.3s ease-in-out",
       }}
     >
-      {/* Theme Dropdown and Highlighter Toggle */}
+      {/* Controls Panel */}
       <div
         style={{
-          position: "absolute",
-          top: "10px",
-          right: "20px",
-          zIndex: 10,
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          padding: "20px",
+          background: theme === "theme1" ? "rgba(255, 255, 255, 0.9)" : "rgba(245, 245, 245, 0.9)",
+          backdropFilter: "blur(10px)",
+          boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+          zIndex: 1000,
           display: "flex",
-          gap: "10px",
+          justifyContent: "space-between",
+          alignItems: "center",
+          transition: "all 0.3s ease-in-out",
         }}
       >
-        <label style={{ ...currentTheme.label, marginRight: "10px" }}>Theme:</label>
-        <select
-          onChange={(e) => setTheme(e.target.value as "theme1" | "theme2")}
-          value={theme}
-          style={currentTheme.dropdown}
-        >
-          <option value="theme1">Theme 1</option>
-          <option value="theme2">Theme 2</option>
-        </select>
-
-        {/* Highlighter Toggle Switch */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "10px",
-          }}
-        >
-          <label style={{ ...currentTheme.label }}>Highlighter:</label>
-          <div
-            onClick={toggleHighlighter}
-            style={{
-              width: "50px",
-              height: "25px",
-              backgroundColor: isHighlighterOn ? "#28a745" : "#dc3545",
-              borderRadius: "25px",
-              position: "relative",
-              cursor: "pointer",
-              transition: "background-color 0.3s ease",
-            }}
-          >
-            <div
+        {/* Left Controls */}
+        <div style={{ display: "flex", gap: "20px", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <label style={{ 
+              fontWeight: "600", 
+              color: theme === "theme1" ? "black" : "#333"
+            }}>
+              Speed:
+            </label>
+            <select
+              onChange={(e) => setSpeed(Number(e.target.value))}
+              value={speed}
               style={{
-                width: "21px",
-                height: "21px",
-                backgroundColor: "white",
-                borderRadius: "50%",
-                position: "absolute",
-                top: "2px",
-                left: isHighlighterOn ? "27px" : "2px",
-                transition: "left 0.3s ease",
+                padding: "8px 12px",
+                backgroundColor: "#333",
+                color: "#fff",
+                border: "none",
+                borderRadius: "8px",
+                cursor: "pointer",
+                transition: "all 0.2s ease",
+                outline: "none",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
               }}
-            />
+            >
+              <option value={2000}>0.25x</option>
+              <option value={1500}>0.5x</option>
+              <option value={1100}>0.75x</option>
+              <option value={1000}>1.0x</option>
+              <option value={700}>1.25x</option>
+              <option value={500}>1.5x</option>
+              <option value={300}>1.75x</option>
+              <option value={100}>2.0x</option>
+            </select>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <label style={{ 
+              fontWeight: "600", 
+              color: theme === "theme1" ? "black" : "#333"
+            }}>
+              Words:
+            </label>
+            <select
+              onChange={(e) => setNumWords(Number(e.target.value))}
+              value={numWords}
+              style={{
+                padding: "8px 12px",
+                backgroundColor: "#333",
+                color: "#fff",
+                border: "none",
+                borderRadius: "8px",
+                cursor: "pointer",
+                transition: "all 0.2s ease",
+                outline: "none",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+              }}
+            >
+              {[3, 4, 5, 6, 7].map(num => (
+                <option key={num} value={num}>{num} Words</option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ display: "flex", gap: "10px" }}>
+            <button
+              onClick={startReading}
+              disabled={isReading}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: isReading ? "#a8e6cf" : "#2ecc71",
+                color: "#ffffff",
+                border: "none",
+                borderRadius: "8px",
+                cursor: isReading ? "not-allowed" : "pointer",
+                transition: "all 0.2s ease",
+                transform: isReading ? "scale(0.95)" : "scale(1)",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                fontWeight: "600",
+                opacity: isReading ? 0.7 : 1,
+              }}
+            >
+              Start
+            </button>
+            <button
+              onClick={stopReading}
+              disabled={!isReading}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: !isReading ? "#ffb8b8" : "#e74c3c",
+                color: "#ffffff",
+                border: "none",
+                borderRadius: "8px",
+                cursor: !isReading ? "not-allowed" : "pointer",
+                transition: "all 0.2s ease",
+                transform: !isReading ? "scale(0.95)" : "scale(1)",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                fontWeight: "600",
+                opacity: !isReading ? 0.7 : 1,
+              }}
+            >
+              Stop
+            </button>
+          </div>
+        </div>
+
+        {/* Right Controls */}
+        <div style={{ display: "flex", gap: "20px", alignItems: "center" }}>
+          {/* TTS Toggle */}
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <label style={{ 
+              fontWeight: "600", 
+              color: theme === "theme1" ? "black" : "#333"
+            }}>
+              TTS:
+            </label>
+            <div
+              onClick={toggleTTS}
+              style={{
+                width: "50px",
+                height: "26px",
+                backgroundColor: isTTSEnabled ? "#28a745" : "#dc3545",
+                borderRadius: "13px",
+                position: "relative",
+                cursor: "pointer",
+                transition: "background-color 0.3s ease",
+                boxShadow: "inset 0 2px 4px rgba(0,0,0,0.1)",
+              }}
+            >
+              <div
+                style={{
+                  width: "22px",
+                  height: "22px",
+                  backgroundColor: "white",
+                  borderRadius: "11px",
+                  position: "absolute",
+                  top: "2px",
+                  left: isTTSEnabled ? "26px" : "2px",
+                  transition: "left 0.3s ease, box-shadow 0.3s ease",
+                  boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Theme Toggle */}
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <label style={{ 
+              fontWeight: "600", 
+              color: theme === "theme1" ? "black" : "#333"
+            }}>
+              Theme:
+            </label>
+            <select
+              onChange={(e) => setTheme(e.target.value as "theme1" | "theme2")}
+              value={theme}
+              style={{
+                padding: "8px 12px",
+                backgroundColor: "#333",
+                color: "#fff",
+                border: "none",
+                borderRadius: "8px",
+                cursor: "pointer",
+                transition: "all 0.2s ease",
+                outline: "none",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+              }}
+            >
+              <option value="theme1">Theme 1</option>
+              <option value="theme2">Theme 2</option>
+            </select>
+          </div>
+
+          {/* Highlighter Toggle */}
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <label style={{ 
+              fontWeight: "600", 
+              color: theme === "theme1" ? "black" : "#333"
+            }}>
+              Highlighter:
+            </label>
+            <div
+              onClick={toggleHighlighter}
+              style={{
+                width: "50px",
+                height: "26px",
+                backgroundColor: isHighlighterOn ? "#28a745" : "#dc3545",
+                borderRadius: "13px",
+                position: "relative",
+                cursor: "pointer",
+                transition: "background-color 0.3s ease",
+                boxShadow: "inset 0 2px 4px rgba(0,0,0,0.1)",
+              }}
+            >
+              <div
+                style={{
+                  width: "22px",
+                  height: "22px",
+                  backgroundColor: "white",
+                  borderRadius: "11px",
+                  position: "absolute",
+                  top: "2px",
+                  left: isHighlighterOn ? "26px" : "2px",
+                  transition: "left 0.3s ease, box-shadow 0.3s ease",
+                  boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+                }}
+              />
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Controls (Speed, Words, Start/Stop) */}
-      <div
-        style={{
-          position: "absolute",
-          top: "10px",
-          left: "20px",
-          zIndex: 10,
-          display: "flex",
-          flexDirection: "row",
-          gap: "10px",
-        }}
-      >
-        <div>
-          <label style={{ ...currentTheme.label, marginRight: "10px" }}>Speed:</label>
-          <select
-            onChange={(e) => setSpeed(Number(e.target.value))}
-            value={speed}
-            style={currentTheme.dropdown}
-          >
-            <option value={2000}>0.25</option>
-            <option value={1500}>0.5</option>
-            <option value={1100}>0.75</option>
-            <option value={1000}>Normal</option>
-            <option value={700}>1.25</option>
-            <option value={500}>1.5</option>
-            <option value={300}>1.75</option>
-            <option value={100}>2</option>
-          </select>
-        </div>
-        <div>
-          <label style={{ ...currentTheme.label, marginRight: "10px" }}>Words:</label>
-          <select
-            onChange={(e) => setNumWords(Number(e.target.value))}
-            value={numWords}
-            style={currentTheme.dropdown}
-          >
-            <option value={3}>3 Words</option>
-            <option value={4}>4 Words</option>
-            <option value={5}>5 Words</option>
-            <option value={6}>6 Words</option>
-            <option value={7}>7 Words</option>
-          </select>
-        </div>
-        {/* Start & Stop Buttons */}
-        <div style={{ display: "flex", gap: "10px" }}>
-          <button
-            onClick={startReading}
-            disabled={isReading}
-            style={currentTheme.button}
-          >
-            Start
-          </button>
-          <button
-            onClick={stopReading}
-            disabled={!isReading}
-            style={{
-              ...currentTheme.button,
-              backgroundColor: "#dc3545",
-            }}
-          >
-            Stop
-          </button>
-        </div>
-      </div>
-
-      {/* TTS Toggle Switch */}
-      <div
-        style={{
-          position: "absolute",
-          top: "100px",
-          left: "20px",
-          zIndex: 10,
-          display: "flex",
-          alignItems: "center",
-          gap: "10px",
-        }}
-      >
-        <label style={{ ...currentTheme.label }}>TTS:</label>
-        <div
-          onClick={toggleTTS}
-          style={{
-            width: "50px",
-            height: "25px",
-            backgroundColor: isTTSEnabled ? "#28a745" : "#dc3545",
-            borderRadius: "25px",
-            position: "relative",
-            cursor: "pointer",
-            transition: "background-color 0.3s ease",
-          }}
-        >
-          <div
-            style={{
-              width: "21px",
-              height: "21px",
-              backgroundColor: "white",
-              borderRadius: "50%",
-              position: "absolute",
-              top: "2px",
-              left: isTTSEnabled ? "27px" : "2px",
-              transition: "left 0.3s ease",
-            }}
-          />
-        </div>
-      </div>
-
-      {/* Text Display with Highlighting */}
+      {/* Text Display */}
       <div
         ref={textContainerRef}
         style={{
           width: "100%",
-          height: "100%",
-          overflow: "auto",
-          marginTop: "140px",
+          height: "calc(100vh - 100px)",
+          marginTop: "80px",
+          padding: "0",
+          overflow: "hidden",
+          backgroundColor: theme === "theme1" ? "white" : "#f5f5f5",
+          borderRadius: "12px",
+          boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+          transition: "all 0.3s ease-in-out",
+          display: "flex",
+          justifyContent: "center"
         }}
       >
-        <p
-          style={{
-            fontSize: "18px",
-            lineHeight: "1.6",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-          }}
-        >
-          {words.map((word, index) => (
-            <span
-              ref={(el) => (wordElementsRef.current[index] = el)}
-              key={index}
-              onClick={() => handleWordClick(index)}
-              onMouseEnter={(e) => handleMouseEnter(index, e)}
-              onMouseLeave={handleMouseLeave}
-              style={{
-                color:
-                  highlightedWords.has(index)
-                    ? "black" // Highlighted words are black
-                    : index >= currentIndex && index < currentIndex + numWords
-                    ? currentTheme.textHighlight.color // Reading highlight color
-                    : currentTheme.container.color, // Default color
-                fontWeight: highlightedWords.has(index) ? "bold" : "normal", // Bold for highlighted words
-                transition: "color 0.3s ease-in-out, font-weight 0.3s ease-in-out",
-                marginRight: "5px",
-                cursor: isHighlighterOn ? "pointer" : "default",
-              }}
-            >
-              {word}
-            </span>
-          ))}
-        </p>
+        <div style={{
+          width: "100%",
+          maxWidth: "800px",
+          height: "100%",
+          overflow: "auto",
+          padding: "20px",
+        }}>
+          <p
+            style={{
+              fontSize: "18px",
+              lineHeight: "1.8",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              margin: "0",
+            }}
+          >
+            {words.map((word, index) => (
+              <span
+                ref={(el) => (wordElementsRef.current[index] = el)}
+                key={index}
+                onClick={() => handleWordClick(index)}
+                onMouseEnter={(e) => handleMouseEnter(index, e)}
+                onMouseLeave={handleMouseLeave}
+                className={highlightedWords.has(index) ? 'highlighted-word' : ''}
+                style={{
+                  color:
+                    highlightedWords.has(index)
+                      ? "black"
+                      : index >= currentIndex && index < currentIndex + numWords
+                      ? theme === "theme1" ? "black" : "#007bff"
+                      : theme === "theme1" ? "rgb(201,197,197)" : "#333",
+                  fontWeight: highlightedWords.has(index) ? "bold" : "normal",
+                  padding: "2px 1px",
+                  margin: "0 2px",
+                  borderRadius: "3px",
+                  cursor: isHighlighterOn ? "pointer" : "default",
+                  transition: "all 0.2s ease-in-out",
+                  display: "inline-block",
+                  transform: index >= currentIndex && index < currentIndex + numWords ? "scale(1.05)" : "scale(1)",
+                }}
+              >
+                {word}
+              </span>
+            ))}
+          </p>
+        </div>
       </div>
 
-      {/* Dialog Box for Word Meaning */}
+      {/* Word Meaning Dialog */}
       {selectedWord && dialogPosition && (
         <div
+          className="word-meaning-dialog"
+          onMouseEnter={handleDialogMouseEnter}
+          onMouseLeave={handleDialogMouseLeave}
           style={{
-            position: "absolute",
-            top: dialogPosition.top - 50, // Adjust position as needed
+            position: "fixed",
+            top: dialogPosition.top - 80,
             left: dialogPosition.left,
-            backgroundColor: "white",
-            border: "1px solid #ccc",
-            borderRadius: "5px",
-            padding: "10px",
-            boxShadow: "0 2px 10px rgba(0, 0, 0, 0.1)",
+            backgroundColor: theme === "theme1" ? "white" : "#f8f9fa",
+            border: "none",
+            borderRadius: "12px",
+            padding: "16px 20px",
+            boxShadow: "0 8px 24px rgba(0, 0, 0, 0.12)",
             zIndex: 1000,
+            maxWidth: "320px",
+            animation: "dialogFadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+            transform: "translateY(0)",
+            backdropFilter: "blur(8px)",
+            pointerEvents: "auto", // Ensure the dialog can receive mouse events
           }}
         >
-          <strong>{selectedWord}</strong>: {wordMeaning || "Loading..."}
+          <div style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px"
+          }}>
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              paddingBottom: "8px",
+              borderBottom: "1px solid rgba(0,0,0,0.1)"
+            }}>
+              <strong style={{ 
+                color: theme === "theme1" ? "#1a1a1a" : "#2d3436",
+                fontSize: "18px",
+                letterSpacing: "0.3px"
+              }}>
+                {selectedWord}
+              </strong>
+              <span style={{
+                backgroundColor: theme === "theme1" ? "#e9ecef" : "#dee2e6",
+                color: theme === "theme1" ? "#495057" : "#343a40",
+                padding: "2px 8px",
+                borderRadius: "12px",
+                fontSize: "12px",
+                fontWeight: 500
+              }}>
+                noun
+              </span>
+            </div>
+            
+            <div style={{
+              color: theme === "theme1" ? "#495057" : "#343a40",
+              fontSize: "15px",
+              lineHeight: "1.6",
+              position: "relative",
+              paddingLeft: wordMeaning ? "16px" : "0"
+            }}>
+              {wordMeaning ? (
+                <>
+                  <span style={{
+                    position: "absolute",
+                    left: "0",
+                    top: "0",
+                    color: theme === "theme1" ? "#868e96" : "#6c757d"
+                  }}>•</span>
+                  {wordMeaning}
+                </>
+              ) : (
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  color: "#868e96"
+                }}>
+                  <div className="loading-dots">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </div>
+                  Fetching meaning
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
+
+      <style>
+        {`
+          @keyframes dialogFadeIn {
+            0% {
+              opacity: 0;
+              transform: translateY(10px) scale(0.95);
+            }
+            100% {
+              opacity: 1;
+              transform: translateY(0) scale(1);
+            }
+          }
+
+          @keyframes loadingDots {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+          }
+
+          .loading-dots {
+            display: flex;
+            gap: 4px;
+          }
+
+          .loading-dots span {
+            width: 6px;
+            height: 6px;
+            background-color: #868e96;
+            border-radius: 50%;
+            display: inline-block;
+            animation: loadingDots 1.4s infinite ease-in-out both;
+          }
+
+          .loading-dots span:nth-child(1) {
+            animation-delay: -0.32s;
+          }
+
+          .loading-dots span:nth-child(2) {
+            animation-delay: -0.16s;
+          }
+
+          /* Updated scrollbar styles */
+          div::-webkit-scrollbar {
+            width: 12px;
+          }
+
+          div::-webkit-scrollbar-track {
+            background: ${theme === "theme1" ? "#f1f1f1" : "#ddd"};
+            border-radius: 0;
+          }
+
+          div::-webkit-scrollbar-thumb {
+            background: ${theme === "theme1" ? "#888" : "#666"};
+            border-radius: 0;
+            border: 3px solid ${theme === "theme1" ? "#f1f1f1" : "#ddd"};
+          }
+
+          div::-webkit-scrollbar-thumb:hover {
+            background: ${theme === "theme1" ? "#555" : "#444"};
+          }
+        `}
+      </style>
     </div>
   );
 };
