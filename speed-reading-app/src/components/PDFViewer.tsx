@@ -16,6 +16,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
   const [intervalId, setIntervalId] = useState<NodeJS.Timeout | null>(null); // Stores interval reference
   const [theme, setTheme] = useState<"theme1" | "theme2">("theme1"); // Theme state
   const [isHighlighterOn, setIsHighlighterOn] = useState<boolean>(false); // Highlighter state
+  const [selectedFont, setSelectedFont] = useState<string>("Arial"); // Font state
   const [highlightedWords, setHighlightedWords] = useState<Set<number>>(new Set()); // Track highlighted words
   const [isTTSEnabled, setIsTTSEnabled] = useState<boolean>(false); // TTS state
   const [selectedWord, setSelectedWord] = useState<string | null>(null); // Selected word for meaning
@@ -26,6 +27,18 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
   const textContainerRef = useRef<HTMLDivElement | null>(null);
   const wordElementsRef = useRef<(HTMLSpanElement | null)[]>([]);
   const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+
+  // Font options
+  const fontOptions = [
+    { value: "Arial", label: "Arial" },
+    { value: "Times New Roman", label: "Times New Roman" },
+    { value: "Georgia", label: "Georgia" },
+    { value: "Verdana", label: "Verdana" },
+    { value: "Roboto", label: "Roboto" },
+    { value: "Open Sans", label: "Open Sans" },
+    { value: "Lato", label: "Lato" },
+    { value: "Merriweather", label: "Merriweather" },
+  ];
 
   // Extract text from PDF
   useEffect(() => {
@@ -341,6 +354,39 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
       >
         {/* Left Controls */}
         <div style={{ display: "flex", gap: "20px", alignItems: "center" }}>
+          {/* Font Selector */}
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <label style={{ 
+              fontWeight: "600", 
+              color: theme === "theme1" ? "black" : "#333"
+            }}>
+              Font:
+            </label>
+            <select
+              onChange={(e) => setSelectedFont(e.target.value)}
+              value={selectedFont}
+              className="font-select"
+              style={{
+                padding: "8px 12px",
+                backgroundColor: "#333",
+                color: "#fff",
+                border: "none",
+                borderRadius: "8px",
+                cursor: "pointer",
+                transition: "all 0.2s ease",
+                outline: "none",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                fontFamily: selectedFont,
+              }}
+            >
+              {fontOptions.map((font) => (
+                <option key={font.value} value={font.value} style={{ fontFamily: font.value }}>
+                  {font.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <label style={{ 
               fontWeight: "600", 
@@ -581,6 +627,8 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
               whiteSpace: "pre-wrap",
               wordBreak: "break-word",
               margin: "0",
+              fontFamily: selectedFont,
+              transition: "font-family 0.3s ease-in-out",
             }}
           >
             {words.map((word, index) => (
@@ -764,6 +812,15 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file }) => {
 
           div::-webkit-scrollbar-thumb:hover {
             background: ${theme === "theme1" ? "#555" : "#444"};
+          }
+
+          /* Font styles */
+          .font-select {
+            font-family: inherit;
+          }
+
+          .font-select option {
+            font-family: inherit;
           }
         `}
       </style>
